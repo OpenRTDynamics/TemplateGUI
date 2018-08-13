@@ -77,7 +77,7 @@ var AngSens_running = 0; // NONGENERIC
 var CurrentScreen = '';
 var CurrentConfig = '';
 var AppNameToLoad = undefined;
-var NewDatamodusActive = 1;
+// var NewDatamodusActive = 1;
 var PrintORTDStdout = false;
 
 
@@ -160,87 +160,71 @@ var RemoteShellCommands = {
 
 
 
-// http-server
+// 
+// NEW EXPRESS-BASED HTTP
+// 
 
-// got from stackoverflow: 
-// http://stackoverflow.com/questions/6084360/node-js-as-a-simple-web-server
-var httpserver = http.createServer(function(request, response) {
 
-    //  console.log(request);
 
-    var uri = url.parse(request.url).pathname,
-        filename = path.join(process.cwd(), 'html', uri);
 
-    var ParsedUri = path.parse(uri);
-    if (ParsedUri.dir == '/json') {
-        // Matlab: webread('http://10.211.55.9:8091/json/block.states.userdata.EC_MainControl.States');
-        var ScilabVarName = ParsedUri.base;
+// openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days XXX
 
-        // console.log('Requesting Scilab variable: ' + ScilabVarName);
-        ScilabProc.stdin.write(ScilabVarName + '\n');
-    }
+// https://hackernoon.com/setting-up-node-js-with-a-database-part-1-3f2461bdd77f
 
-    // console.log(path.parse(uri));
+var fs = require('fs');
 
-    fs.stat(filename, function(err, stat) {
-        if (err != null) {
-            //if(!exists) {
-            response.writeHead(404, {
-                "Content-Type": "text/plain"
-            });
-            response.write("404 Not Found\n");
-            response.end();
-            return;
-        }
+// var sslOptions = {
+//   key: fs.readFileSync('https/key.pem'),
+//   cert: fs.readFileSync('https/cert.pem'),
+//   passphrase: ''
+// };
 
-        if (fs.statSync(filename).isDirectory()) filename += '/index.html';
+// https.createServer(sslOptions, app).listen(8443)
 
-        fs.readFile(filename, "binary", function(err, file) {
-            if (err) {
-                response.writeHead(500, {
-                    "Content-Type": "text/plain"
-                });
-                response.write(err + "\n");
-                response.end();
-                return;
-            }
+var express = require('express');
+var app = express();
 
-            //   console.log(filename);
-            if (filename.split('.').pop() == 'js') {
-                //  console.log('sending javascipt');
-                response.writeHead(200, {
-                    "Content-Type": "text/javascript"
-                });
-                //         response.writeHead(200);
-            } else {
-                response.writeHead(200);
-            }
-            response.write(file, "binary");
-            response.end();
-        });
-    });
-}).listen(HTTPPORT);
+var server_http = require('http').Server(app);
+//var server_https = require('https').Server(sslOptions, app);
+//https.createServer(sslOptions, app).listen(8443);
 
-// set-up socket.io
-var io = require('socket.io').listen(httpserver);
+var io = require('socket.io')(server_http);
 io.set('log level', 1); // reduce logging
 var SocketIOClient = {
     'socket': 0
 };
 
+server_http.listen(HTTPPORT);
+//server_https.listen(8091);
 
-// try { io.sockets.emit('SCISTOUT', {  "Data" : line } ); } catch(err) { }
+app.use('/', express.static('html'));
+
+// app.get('/', function (req, res) {
+//   res.sendfile(__dirname + '/index.html');
+// });
+
+io.on('connection', function (socket) {
+  socket.emit('news', { hello: 'world' });
+  socket.on('my other event', function (data) {
+    console.log(data);
+
+  });
+});
+
+
+
+
+
+
 
 
 
 //
-//
+// Implement client side of the ORTD UDP-protocoll
 //
 
 
 /* UDP PaPi Packets forwarding */
-
-
 ORTD_PF_decoder = new ORTD_PF_decoderClass(1295793, function(Cfg, Parameters, Sources) {
     // console.log('## NEW CFG ##: ');
     // console.log(Cfg);
@@ -281,9 +265,6 @@ ORTD_PF_decoder = new ORTD_PF_decoderClass(1295793, function(Cfg, Parameters, So
             io.sockets.emit('ScreenChanged', Screen);
             io.sockets.emit('ConfigChanged', CurrentConfig);
 
-
-
-
         }
 
     } catch (err) {
@@ -298,39 +279,36 @@ ORTD_PF_decoder = new ORTD_PF_decoderClass(1295793, function(Cfg, Parameters, So
     //console.log(ORTD_PF_decoder.CurrentSources);
 
 
-    if (NewDatamodusActive == 1) {
 
-        sid = 0;
-        Nsources = ORTD_PF_decoder.CurrentSources.length;
+    sid = 0;
+    Nsources = ORTD_PF_decoder.CurrentSources.length;
 
-        for (sid = 0; sid < Nsources; ++sid) {
+    for (sid = 0; sid < Nsources; ++sid) {
 
-            NV = parseInt(ORTD_PF_decoder.CurrentSources[sid].NValues);
-            RcvBuffer = ORTD_PF_decoder.CurrentSources[sid].RcvBuffer;
+        NV = parseInt(ORTD_PF_decoder.CurrentSources[sid].NValues);
+        RcvBuffer = ORTD_PF_decoder.CurrentSources[sid].RcvBuffer;
 
-            var Values = new Array(NV); // FIXME: max of SourceProperties.NValues_send
-
-
-            for (i = 0; i < NV; ++i)
-                Values[i] = RcvBuffer.readDoubleLE(i * 8);
+        var Values = new Array(NV); // FIXME: max of SourceProperties.NValues_send
 
 
+        for (i = 0; i < NV; ++i)
+            Values[i] = RcvBuffer.readDoubleLE(i * 8);
 
-            // new format
-            // Try compression: https://socket.io/blog/socket-io-1-4-0/
-            try {
-                // io.sockets.compress(true).emit('SD', {
-                //     "SourceID": sid,
-                //     "Data": Values
-                // });
 
-                io.sockets.emit('SD', {
-                    "SourceID": sid,
-                    "Data": Values
-                });
-            } catch (err) {}
-        }
 
+        // new format
+        // Try compression: https://socket.io/blog/socket-io-1-4-0/
+        try {
+            // io.sockets.compress(true).emit('SD', {
+            //     "SourceID": sid,
+            //     "Data": Values
+            // });
+
+            io.sockets.emit('SD', {
+                "SourceID": sid,
+                "Data": Values
+            });
+        } catch (err) {}
     }
 
 
@@ -339,38 +317,21 @@ ORTD_PF_decoder = new ORTD_PF_decoderClass(1295793, function(Cfg, Parameters, So
 
 }, function(Buffer, MessageLength) {
     // Send callback
-
-    // // send this packet to ORTD
-
-    //     console.log('Sending ' + MessageLength + ' Values ');
-    //     console.log(Buffer);
+    // send a packet to ORTD
 
     clientORTD.send(Buffer, 0, MessageLength, PORT_toORTD, ORTDAddress);
-
-
-    // server.send(Buffer, 0, MessageLength, ORTD_PORT, ORTD_HOST, function(err, bytes) {
-    //    if (err) throw err;
-    //    console.log('UDP message sent to ' + ORTD_HOST +':'+ ORTD_PORT);
-    // });         
-
 });
 
 
 
 
 //
-// Socket io events
+// Implement the interface to the browser-based clients
 //
 
 io.on('connection', function(socket) {
 
     SocketIOClient.socket = socket;
-
-    // TODO: socket.emit !?!?!?!?
-
-    // io.sockets.emit('StatusUpdate', BuildStatusStruct() );   
-    // io.sockets.emit('ScreenChanged', CurrentScreen);
-    // io.sockets.emit('ConfigChanged',  CurrentConfig);
 
     // TODO emit these events later, when all socket.on-commands are finished
     socket.emit('Welcome', {
@@ -380,19 +341,17 @@ io.on('connection', function(socket) {
     socket.emit('ScreenChanged', CurrentScreen);
     socket.emit('ConfigChanged', CurrentConfig);
 
+    // forwards commands comming from Web/PaPi to Scilab (DISABLED)
+    // socket.on('ConsoleCommand', function(msg) {
+    //     //  console.log(msg);
+    //     //  process.stdout.write('TO S> ' + msg);
 
-
-    // forwards commands comming from Web/PaPi to Scilab
-    socket.on('ConsoleCommand', function(msg) {
-        //  console.log(msg);
-        //  process.stdout.write('TO S> ' + msg);
-
-        try {
-            ScilabProc.stdin.write(msg.Data + '\n');
-        } catch (e) {
-            console.log('Error sending command to scilab.');
-        }
-    });
+    //     try {
+    //         ScilabProc.stdin.write(msg.Data + '\n');
+    //     } catch (e) {
+    //         console.log('Error sending command to scilab.');
+    //     }
+    // });
 
     socket.on('SetTargetServerConfig', function(msg) {
         PrintORTDStdout = msg.PrintORTDStdout;
@@ -400,22 +359,17 @@ io.on('connection', function(socket) {
         console.log(msg);
     });
 
+    // socket.on('LoadApplication', function(msg) {. // (DISABLED)
+    //     //  console.log(msg);
+    //     //  process.stdout.write('TO S> ' + msg);
 
-
-
-    socket.on('LoadApplication', function(msg) {
-        //  console.log(msg);
-        //  process.stdout.write('TO S> ' + msg);
-
-        try {
-            console.log('Loading Application ' + msg.AppName);
-            ScilabProc.stdin.write('exec(\'html/Applications/' + msg.AppName + '.sce\');\n');
-        } catch (e) {
-            console.log('Error sending command to scilab.');
-        }
-    });
-
-
+    //     try {
+    //         console.log('Loading Application ' + msg.AppName);
+    //         ScilabProc.stdin.write('exec(\'html/Applications/' + msg.AppName + '.sce\');\n');
+    //     } catch (e) {
+    //         console.log('Error sending command to scilab.');
+    //     }
+    // });
 
 
     function escapeToSci(str) {
@@ -434,101 +388,70 @@ io.on('connection', function(socket) {
 
     var SessionData;
 
-    socket.on('SetSessionData', function(msg) {
-        //  console.log(msg);
-        //  process.stdout.write('TO S> ' + msg);
+    // socket.on('SetSessionData', function(msg) {.    // (DISABLED)
+    //     //  console.log(msg);
+    //     //  process.stdout.write('TO S> ' + msg);
 
-        try {
-            ScilabProc.stdin.write('SessionData = struct();\n');
-            ScilabProc.stdin.write('SessionData.key = \'' + escapeToSci(msg['key']) + '\';\n');
-            ScilabProc.stdin.write('SessionData.date = \'' + escapeToSci(msg['date']) + '\';\n');
-            ScilabProc.stdin.write('SessionData.time = \'' + escapeToSci(msg['time']) + '\';\n');
+    //     try {
+    //         ScilabProc.stdin.write('SessionData = struct();\n');
+    //         ScilabProc.stdin.write('SessionData.key = \'' + escapeToSci(msg['key']) + '\';\n');
+    //         ScilabProc.stdin.write('SessionData.date = \'' + escapeToSci(msg['date']) + '\';\n');
+    //         ScilabProc.stdin.write('SessionData.time = \'' + escapeToSci(msg['time']) + '\';\n');
 
-            ScilabProc.stdin.write('SessionData.UTCdatestr = \'' + escapeToSci(msg['UTCdatestr']) + '\';\n');
+    //         ScilabProc.stdin.write('SessionData.UTCdatestr = \'' + escapeToSci(msg['UTCdatestr']) + '\';\n');
 
-        } catch (e) {
-            console.log('Error sending command to scilab.');
-        }
-    });
+    //     } catch (e) {
+    //         console.log('Error sending command to scilab.');
+    //     }
+    // });
 
-    socket.on('SetSciVar', function(msg) {
-        //  console.log(msg);
-        //  process.stdout.write('TO S> ' + msg);
+    // socket.on('SetSciVar', function(msg) {   // (DISABLED)
+    //     //  console.log(msg);
+    //     //  process.stdout.write('TO S> ' + msg);
 
-        try {
+    //     try {
 
-            if (msg['Type'] == 'string') {
-                ScilabProc.stdin.write(msg['VarName'] + ' = \'' + escapeToSci(msg['Value']) + '\';\n');
-            } else if (msg['Type'] == 'value') {
-                ScilabProc.stdin.write(msg['VarName'] + ' = \'' + escapeToSci(msg['Value']) + '\';\n');
-            }
+    //         if (msg['Type'] == 'string') {
+    //             ScilabProc.stdin.write(msg['VarName'] + ' = \'' + escapeToSci(msg['Value']) + '\';\n');
+    //         } else if (msg['Type'] == 'value') {
+    //             ScilabProc.stdin.write(msg['VarName'] + ' = \'' + escapeToSci(msg['Value']) + '\';\n');
+    //         }
 
-        } catch (e) {
-            console.log('Error setting scilab variable.');
-        }
-    });
-
-
-    socket.on('SetDatamodus', function(msg) {
-        NewDatamodusActive = msg['NewDatamodus'];
+    //     } catch (e) {
+    //         console.log('Error setting scilab variable.');
+    //     }
+    // });
 
 
 
 
-    });
 
 
+    // socket.on('UpdateSessionData', function(msg) {  // (DISABLED)
+    //     //  console.log(msg);
+    //     //  process.stdout.write('TO S> ' + msg);
+
+    //     SessionData = msg;
+
+    //     try {
+    //         // ScilabProc.stdin.write('TargetServer.SessionData = struct();\n');
+    //         // ScilabProc.stdin.write('TargetServer.SessionData.key = \'' + msg['key'] + '\';\n');
+    //         // ScilabProc.stdin.write('TargetServer.SessionData.date = \'' + msg['date'] + '\';\n');
+    //         // ScilabProc.stdin.write('TargetServer.SessionData.time = \'' + msg['time'] + '\';\n');
+
+    //         // ScilabProc.stdin.write('TargetServer.SessionData.UTCdatestr = \'' + msg['UTCdatestr'] + '\';\n');
+
+    //         Object.keys(msg).forEach(function(key) {
+    //             ScilabProc.stdin.write('SessionData.' + key + ' = \'' + escapeToSci(msg[key]) + '\';\n');
+    //         });
 
 
-    socket.on('UpdateSessionData', function(msg) {
-        //  console.log(msg);
-        //  process.stdout.write('TO S> ' + msg);
+    //     } catch (e) {
+    //         console.log('Error sending command to scilab.');
+    //     }
 
-        SessionData = msg;
+    // });
 
-        try {
-            // ScilabProc.stdin.write('TargetServer.SessionData = struct();\n');
-            // ScilabProc.stdin.write('TargetServer.SessionData.key = \'' + msg['key'] + '\';\n');
-            // ScilabProc.stdin.write('TargetServer.SessionData.date = \'' + msg['date'] + '\';\n');
-            // ScilabProc.stdin.write('TargetServer.SessionData.time = \'' + msg['time'] + '\';\n');
-
-            // ScilabProc.stdin.write('TargetServer.SessionData.UTCdatestr = \'' + msg['UTCdatestr'] + '\';\n');
-
-            Object.keys(msg).forEach(function(key) {
-                ScilabProc.stdin.write('SessionData.' + key + ' = \'' + escapeToSci(msg[key]) + '\';\n');
-            });
-
-
-        } catch (e) {
-            console.log('Error sending command to scilab.');
-        }
-
-
-
-
-    });
-
-
-
-
-    // EnableOldStyleUDPCommunicationToClient = false;
-
-    // if (EnableOldStyleUDPCommunicationToClient) {
-
-    //     socket.on('ORTDPACKET', function(message) {
-    //         //  console.log('Got ORTD packet form PaPI via socket.io');
-    //         //  console.log(message);
-    //         bdata = new Buffer(message, 'base64');
-    //         clientORTD.send(bdata, 0, bdata.length, PORT_toORTD, ORTDAddress);
-    //     });
-
-    // } else {
-
-    //     socket.on('ORTDPACKET', function(message) {
-    //         console.log('**** Your client is trying to use old style communicaltion via direct ORTD control-packets via socket.io ****');
-    //     });
-
-    // }
 
     socket.on('SetParameter', function(message) {
         // Set only one parameter
@@ -543,13 +466,13 @@ io.on('connection', function(socket) {
 
     socket.on('SetParameter2', function(message) {
         // console.log(ORTD_PF_decoder);
-        console.log("Setting parameter v2");
+        // console.log("Setting parameter v2");
 
-        console.log(message);
+        // console.log(message);
         // TODO! If multiple this a nested array
         if (typeof(message.Values) == 'number') {
             V = [message.Values];
-            console.log('SetParameter2: Preformed cast');
+            // console.log('SetParameter2: Preformed cast');
         } else {
             V = message.Values;
         }
@@ -588,26 +511,26 @@ io.on('connection', function(socket) {
 
 
 
-    // RunCommand
-    socket.on('RunCommand', function(message) {
-        //   console.log('RunCommand');
-        //   console.log(message);
-        RunCommand(message);
-    });
+    // RunCommand  // (DISABLED)
+    // socket.on('RunCommand', function(message) {
+    //     //   console.log('RunCommand');
+    //     //   console.log(message);
+    //     RunCommand(message);
+    // });
 
-    socket.on('SetSystemTime', function(message) {
-        CommandLine = 'date -s \'@' + message.SecSince + '\'';
-        console.log('SetSystemTime: ' + CommandLine);
+    // socket.on('SetSystemTime', function(message) {   // (DISABLED)
+    //     CommandLine = 'date -s \'@' + message.SecSince + '\'';
+    //     console.log('SetSystemTime: ' + CommandLine);
 
-        child = exec(CommandLine, function(error, stdout, stderr) {
+    //     child = exec(CommandLine, function(error, stdout, stderr) {
 
-            if (error !== null) {
-                console.log('exec error: ' + error);
-            }
+    //         if (error !== null) {
+    //             console.log('exec error: ' + error);
+    //         }
 
-        });
+    //     });
+    // });
 
-    });
 
     socket.on('StartORTD', function(data) {
         console.log('Rqst. to: Starting ORTD interpreter');
@@ -616,8 +539,8 @@ io.on('connection', function(socket) {
         if (ortd_running == 0) {
             console.log('Starting ORTD interpreter');
 
-            // set datamodus to new style. Old applications must activate their mode in their own
-            NewDatamodusActive = 1;
+            // // set datamodus to new style. Old applications must activate their mode in their own
+            // NewDatamodusActive = 1;
 
             try {
                 Program = data.Program
@@ -822,18 +745,10 @@ io.on('connection', function(socket) {
 
 
 
-
-//var Process_ortdrun = cldprocess.spawn('ortdrun', [ '-s', 'template', '-l', '0'], { cwd : '..' } );
-
-
-
-
-/***************************************\
- * 
- * You should start both hello and world
- * then you will see them communicating.
- * 
- * *************************************/
+// 
+// Implement a communication interface to a scilab instance running in a
+// separate process.
+// 
 
 ipc.config.id = 'world';
 ipc.config.retry = 1500;
@@ -1049,8 +964,9 @@ ipc.server.start();
 
 
 
-// UDP events
-
+//
+// Implement the raw UDP-interface to ORTD
+//
 
 var EMGFrqDivCounter = 1;
 
@@ -1240,7 +1156,15 @@ function ScilabInterface(ScilabExec, EventCallback) {
 
 
 
+
+
+
 function ORTD_PF_decoderClass(SenderId, NewConfigCallback, SourceGroupCompleteCallback, SendCallback) {
+// 
+// This is an abstract client-side implementation of the ORTD-protocoll.
+// The sending and reception of UDP packets is implemented outside of this class.
+// 
+
     //this.SenderId = SenderId;
     this.NewConfigCallback = NewConfigCallback;
     this.SourceGroupCompleteCallback = SourceGroupCompleteCallback;
@@ -1304,7 +1228,7 @@ function ORTD_PF_decoderClass(SenderId, NewConfigCallback, SourceGroupCompleteCa
     this.SetParameter = SetParameter;
 
     function SetParameter(ParameterName, Value) {
-        console.log('Setting par ' + ParameterName + ' to ' + Value);
+        // console.log('Setting par ' + ParameterName + ' to ' + Value);
 
         ParameterID = this.GetParameterID(ParameterName);
 
