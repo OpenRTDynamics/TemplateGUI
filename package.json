@@ -1,0 +1,16 @@
+{
+  "name": "OpenRTDynamics",
+  "version": "1.0.0",
+  "description": "OpenRTDynamics on Docker",
+  "author": "Christian Klauer <chr.klauer@gmail.com>",
+  "main": "ORTDTargetServer.js",
+  "scripts": {
+    "start": "node ORTDTargetServer.js"
+  },
+  "dependencies": {
+    "express": "^4.16.1",
+    "socket.io": "",
+    "byline": "",
+    "node-ipc": ""
+  }
+}
